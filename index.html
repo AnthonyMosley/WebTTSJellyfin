@@ -1,0 +1,1019 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Jellyfin Subtitle TTS (BYO Server + Login)</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; background: #0b0e14; color: #e8eefc; }
+    header { padding: 14px 16px; background: #111827; border-bottom: 1px solid #223; }
+    h1 { margin: 0; font-size: 16px; }
+    .sub { margin-top: 6px; font-size: 12px; opacity: 0.85; line-height: 1.35; }
+    main { padding: 12px 16px; display: grid; gap: 12px; max-width: 1100px; margin: 0 auto; }
+    .card { background: #0f172a; border: 1px solid #223; border-radius: 12px; padding: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.25); }
+    .row { display: grid; gap: 12px; grid-template-columns: 1fr; }
+    @media (min-width: 900px) { .row { grid-template-columns: 1fr 1fr; } }
+    .pill { display:inline-block; font-size: 12px; padding: 4px 8px; border-radius: 999px; border: 1px solid #223; background: #0b1222; }
+    pre { white-space: pre-wrap; word-break: break-word; background: #070a10; border: 1px solid #223; border-radius: 10px; padding: 10px; margin: 0; max-height: 320px; overflow: auto; }
+    #current { font-size: 18px; line-height: 1.4; padding: 10px; background: #0b1222; border: 1px solid #223; border-radius: 10px; min-height: 56px; }
+    button { background: #2563eb; color: white; border: 0; border-radius: 10px; padding: 10px 12px; font-weight: 650; cursor: pointer; }
+    button.secondary { background: #334155; }
+    input, select { background: #0b1222; color:#e8eefc; border: 1px solid #223; border-radius: 10px; padding: 10px 12px; }
+    input[type="number"] { width: 120px; }
+    select { min-width: 260px; }
+    input[type="range"] { width: 260px; padding: 0; height: 26px; }
+    .small { font-size: 12px; opacity: 0.85; line-height: 1.35; }
+    .muted { opacity: 0.8; }
+    .kv { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    label.switch { display:flex; gap:8px; align-items:center; cursor:pointer; user-select:none; }
+    label.switch input { width: 18px; height: 18px; }
+    .grid2 { display:grid; grid-template-columns: 1fr; gap:10px; }
+    @media (min-width: 720px) { .grid2 { grid-template-columns: 1fr 1fr; } }
+  </style>
+</head>
+
+<body>
+<header>
+  <h1>🎧 Jellyfin Subtitle TTS (WebSocket-synced)</h1>
+  <div class="sub">
+    Fixes “desktop session time freezes” by using Jellyfin’s websocket playback progress events as the clock.
+  </div>
+</header>
+
+<main>
+  <div class="card">
+    <div class="small">Account</div>
+    <div class="grid2" style="margin-top:8px;">
+      <div>
+        <div class="small">Server URL</div>
+        <input id="serverUrl" type="text" placeholder="http://192.168.0.95:8096" />
+      </div>
+      <div>
+        <div class="small">App name</div>
+        <input id="appName" type="text" value="SubtitleTTSWeb" />
+      </div>
+      <div>
+        <div class="small">Username</div>
+        <input id="username" type="text" placeholder="username" />
+      </div>
+      <div>
+        <div class="small">Password</div>
+        <input id="password" type="password" placeholder="password" />
+      </div>
+    </div>
+
+    <div class="kv" style="margin-top:10px;">
+      <button id="btnLogin">Log in</button>
+      <button id="btnLogout" class="secondary">Log out</button>
+      <button id="btnWhoAmI" class="secondary">Check token</button>
+      <span class="pill" id="authPill">Not logged in</span>
+      <span class="pill" id="wsPill">WS: disconnected</span>
+    </div>
+
+    <div class="small muted" style="margin-top:8px;">
+      Token stored locally. WebSocket uses the same token to receive PlaybackProgress events.
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <div>
+        <div class="small">Playback session to follow</div>
+        <div class="kv" style="margin-top:8px;">
+          <button id="btnRefreshSessions" class="secondary">Refresh sessions</button>
+          <select id="sessionSelect"></select>
+        </div>
+
+        <div class="kv" style="margin-top:10px;">
+          <label class="switch">
+            <input id="useClientSubtitleToggle" type="checkbox" checked>
+            <span class="small">Use client-selected subtitle track</span>
+          </label>
+          <select id="subtitleTrackSelect" disabled></select>
+          <button id="btnReloadSubs" class="secondary">Reload subtitles</button>
+        </div>
+
+        <div class="small muted" style="margin-top:8px;" id="clockInfo">
+          Clock: unknown
+        </div>
+      </div>
+
+      <div style="display:flex; gap:8px; align-items:end; justify-content:flex-end; flex-wrap:wrap;">
+        <div>
+          <div class="small">Poll (ms)</div>
+          <input id="pollMs" type="number" min="150" step="50" value="200">
+        </div>
+        <div>
+          <div class="small">Rate</div>
+          <input id="rate" type="number" min="0.75" max="2.0" step="0.05" value="1.25">
+        </div>
+        <div>
+          <div class="small">Voice</div>
+          <select id="voiceSelect"></select>
+        </div>
+        <button id="btnTest" class="secondary">Test voice</button>
+        <button id="btnStart">Start</button>
+        <button id="btnStop" class="secondary">Stop</button>
+      </div>
+    </div>
+
+    <div class="kv" style="margin-top:12px;">
+      <div>
+        <div class="small">Sync offset (<span id="offsetReadout">+0.00s</span>)</div>
+        <input id="offsetSlider" type="range" min="-5.0" max="5.0" step="0.05" value="0.0">
+      </div>
+      <label class="switch">
+        <input id="autoSyncToggle" type="checkbox" checked>
+        <span class="small">Auto sync</span>
+      </label>
+      <button id="btnResetOffset" class="secondary">Reset offset</button>
+    </div>
+
+    <div class="small" style="margin-top:10px" id="voiceInfo">Voices: loading…</div>
+  </div>
+
+  <div class="card">
+    <div class="small">Now speaking</div>
+    <div id="current">Waiting…</div>
+  </div>
+
+  <div class="row">
+    <div class="card">
+      <div class="small">Status</div>
+      <pre id="status"></pre>
+    </div>
+    <div class="card">
+      <div class="small">Last fetched VTT preview</div>
+      <pre id="vttPreview"></pre>
+    </div>
+  </div>
+</main>
+
+<script>
+/* ========= STORAGE ========= */
+const STORE = {
+  server: "jf_tts_server",
+  app: "jf_tts_app",
+  token: "jf_tts_token",
+  userId: "jf_tts_userId",
+  serverId: "jf_tts_serverId",
+  deviceId: "jf_tts_deviceId",
+  voiceName: "jf_tts_voice_name",
+  chosenSessionId: "jf_tts_session_id",
+  useClientSubtitle: "jf_tts_use_client_subtitle",
+  overrideSubtitleIndex: "jf_tts_override_subtitle_index"
+};
+
+/* ========= SETTINGS ========= */
+const PREROLL_SEC = 0.35;
+const CATCHUP_GRACE = 0.35;
+const MAX_CHARS = 120;
+const DROP_BRACKETS = true;
+
+const DONT_INTERRUPT = true;
+const STALE_AFTER_SEC = 1.10;
+
+const DEFAULT_OFFSET_SEC = 0.0;
+const OFFSET_RANGE = 5.0;
+
+let avgLateSec = 0;
+const LATE_TARGET_SEC = 0.10;
+const LATE_EMA_ALPHA = 0.12;
+const AUTO_STEP_GAIN = 0.20;
+const AUTO_DEADBAND = 0.04;
+const AUTO_MAX_STEP = 0.05;
+
+/* ========= DOM ========= */
+const el = (id) => document.getElementById(id);
+
+/* ========= STATE ========= */
+let timer = null;
+let cues = [];
+let lastSpokenIdx = -1;
+let pending = null;
+
+let active = { itemId:null, mediaSourceId:null, subtitleIndex:null, title:null };
+let offsetSec = DEFAULT_OFFSET_SEC;
+
+let sessionsCache = [];
+let selectedSessionId = null;
+let subtitleStreams = [];
+
+let ws = null;
+let wsConnected = false;
+
+// Clock sources
+let lastSessionSec = null;
+let lastWSSec = null;
+let lastWSAt = 0; // performance.now timestamp for last ws update
+let lastWSItemId = null;
+let lastWSSessionId = null;
+
+function now(){ return new Date().toLocaleTimeString(); }
+function status(line){ el("status").textContent = `[${now()}] ${line}\n` + el("status").textContent; }
+
+function normalizeServerUrl(u) {
+  u = (u || "").trim();
+  if (!u) return "";
+  return u.replace(/\/+$/, "");
+}
+function getServer() { return normalizeServerUrl(localStorage.getItem(STORE.server) || el("serverUrl").value); }
+function getToken() { return localStorage.getItem(STORE.token) || ""; }
+function getUserId() { return localStorage.getItem(STORE.userId) || ""; }
+function getAppName() { return localStorage.getItem(STORE.app) || el("appName").value || "SubtitleTTSWeb"; }
+
+function ensureDeviceId() {
+  let id = localStorage.getItem(STORE.deviceId);
+  if (!id) {
+    id = (crypto?.randomUUID?.() || String(Math.random()).slice(2)) + "-" + Date.now();
+    localStorage.setItem(STORE.deviceId, id);
+  }
+  return id;
+}
+function setAuthPill(ok, text) {
+  const p = el("authPill");
+  p.textContent = text;
+  p.style.background = ok ? "#064e3b" : "#0b1222";
+  p.style.borderColor = ok ? "#065f46" : "#223";
+}
+function setWSPill(ok, text) {
+  const p = el("wsPill");
+  p.textContent = text;
+  p.style.background = ok ? "#1d4ed8" : "#0b1222";
+  p.style.borderColor = ok ? "#1e40af" : "#223";
+}
+
+/* ========= HTTP ========= */
+function authHeaders() {
+  const token = getToken();
+  const deviceId = ensureDeviceId();
+  return {
+    "Accept": "application/json",
+    "Content-Type": "application/json",
+    "X-Emby-Token": token,
+    "Authorization": `MediaBrowser Token="${token}", Client="SubtitleTTS", Device="Web", DeviceId="${deviceId}", Version="1.0.0"`
+  };
+}
+
+async function jfFetch(path, opts = {}) {
+  const server = getServer();
+  if (!server) throw new Error("Server URL is not set");
+  const url = server + path;
+  const headers = { ...(opts.headers || {}) };
+  if (getToken()) Object.assign(headers, authHeaders());
+
+  const resp = await fetch(url, { ...opts, headers });
+  const text = await resp.text();
+
+  let json = null;
+  try { json = JSON.parse(text); } catch {}
+  return { ok: resp.ok, status: resp.status, statusText: resp.statusText, text, json };
+}
+
+/* ========= WS =========
+   Jellyfin websocket: /socket
+   We include api_key (token) as query param so it can auth.
+*/
+function serverToWS(serverUrl) {
+  // http://x -> ws://x, https://x -> wss://x
+  if (serverUrl.startsWith("https://")) return "wss://" + serverUrl.slice("https://".length);
+  if (serverUrl.startsWith("http://")) return "ws://" + serverUrl.slice("http://".length);
+  // assume http
+  return "ws://" + serverUrl;
+}
+
+function connectWS() {
+  disconnectWS();
+
+  const server = getServer();
+  const token = getToken();
+  if (!server || !token) {
+    setWSPill(false, "WS: disconnected");
+    return;
+  }
+
+  const base = serverToWS(server);
+  const deviceId = encodeURIComponent(ensureDeviceId());
+  const apiKey = encodeURIComponent(token);
+
+  // Jellyfin supports /socket. Add deviceId to keep it tidy.
+  const url = `${base}/socket?api_key=${apiKey}&deviceId=${deviceId}`;
+
+  try {
+    ws = new WebSocket(url);
+  } catch (e) {
+    status(`WS: failed to create socket: ${String(e)}`);
+    setWSPill(false, "WS: failed");
+    return;
+  }
+
+  ws.onopen = () => {
+    wsConnected = true;
+    setWSPill(true, "WS: connected");
+    status("WS connected.");
+  };
+
+  ws.onclose = () => {
+    wsConnected = false;
+    setWSPill(false, "WS: disconnected");
+    status("WS disconnected.");
+  };
+
+  ws.onerror = () => {
+    wsConnected = false;
+    setWSPill(false, "WS: error");
+    status("WS error.");
+  };
+
+  ws.onmessage = (evt) => {
+    // Jellyfin sends JSON messages with MessageType + Data
+    let msg = null;
+    try { msg = JSON.parse(evt.data); } catch { return; }
+    if (!msg || !msg.MessageType) return;
+
+    // PlaybackProgress is the money event
+    if (msg.MessageType === "PlaybackProgress" || msg.MessageType === "PlaybackStart" || msg.MessageType === "PlaybackStop") {
+      const d = msg.Data || {};
+      // We need to match the chosen session
+      // Common fields seen: SessionId, ItemId, PositionTicks
+      const sessId = d.SessionId || d.Session?.Id;
+      const itemId = d.ItemId || d.NowPlayingItem?.Id;
+
+      if (selectedSessionId && sessId && sessId !== selectedSessionId) return;
+
+      if (typeof d.PositionTicks === "number") {
+        lastWSSec = d.PositionTicks / 10_000_000;
+        lastWSAt = performance.now();
+        lastWSItemId = itemId || null;
+        lastWSSessionId = sessId || null;
+      }
+    }
+  };
+}
+
+function disconnectWS() {
+  if (ws) {
+    try { ws.close(); } catch {}
+    ws = null;
+  }
+  wsConnected = false;
+  setWSPill(false, "WS: disconnected");
+}
+
+/* ========= LOGIN ========= */
+async function login() {
+  const server = normalizeServerUrl(el("serverUrl").value);
+  const user = (el("username").value || "").trim();
+  const pass = el("password").value || "";
+  const app = (el("appName").value || "SubtitleTTSWeb").trim() || "SubtitleTTSWeb";
+
+  if (!server || !user || !pass) {
+    status("Login: missing server/username/password");
+    setAuthPill(false, "Missing fields");
+    return;
+  }
+
+  localStorage.setItem(STORE.server, server);
+  localStorage.setItem(STORE.app, app);
+  ensureDeviceId();
+
+  const r = await jfFetch(`/Users/AuthenticateByName`, {
+    method: "POST",
+    headers: {
+      "Accept": "application/json",
+      "Content-Type": "application/json",
+      "Authorization": `MediaBrowser Client="SubtitleTTS", Device="Web", DeviceId="${ensureDeviceId()}", Version="1.0.0"`
+    },
+    body: JSON.stringify({ Username: user, Pw: pass })
+  });
+
+  if (!r.ok || !r.json) {
+    status(`Login failed: ${r.status} ${r.statusText}`);
+    status(`Body: ${r.text.slice(0,200)}`);
+    setAuthPill(false, `Login failed (${r.status})`);
+    return;
+  }
+
+  const token = r.json.AccessToken;
+  const userId = r.json.User?.Id;
+  const serverId = r.json.ServerId;
+
+  localStorage.setItem(STORE.token, token);
+  localStorage.setItem(STORE.userId, userId);
+  if (serverId) localStorage.setItem(STORE.serverId, serverId);
+
+  el("password").value = "";
+  setAuthPill(true, `Logged in as ${r.json.User?.Name || user}`);
+  status("Login OK. Token stored locally.");
+
+  connectWS();
+  await refreshSessions();
+}
+
+function logout() {
+  stop();
+  speechSynthesis.cancel();
+  pending = null;
+  cues = [];
+  lastSpokenIdx = -1;
+
+  active = { itemId:null, mediaSourceId:null, subtitleIndex:null, title:null };
+  sessionsCache = [];
+  selectedSessionId = null;
+  subtitleStreams = [];
+
+  lastSessionSec = null;
+  lastWSSec = null;
+  lastWSAt = 0;
+  lastWSItemId = null;
+  lastWSSessionId = null;
+
+  localStorage.removeItem(STORE.token);
+  localStorage.removeItem(STORE.userId);
+  localStorage.removeItem(STORE.serverId);
+  localStorage.removeItem(STORE.chosenSessionId);
+
+  disconnectWS();
+
+  setAuthPill(false, "Not logged in");
+  el("sessionSelect").innerHTML = "";
+  el("subtitleTrackSelect").innerHTML = "";
+  el("subtitleTrackSelect").disabled = true;
+  status("Logged out.");
+}
+
+async function whoami() {
+  const r = await jfFetch(`/Users/Me`, { method: "GET" });
+  if (!r.ok || !r.json) {
+    status(`Token check failed: ${r.status} ${r.statusText}`);
+    status(`Body: ${r.text.slice(0,120)}`);
+    setAuthPill(false, `Token invalid (${r.status})`);
+    return;
+  }
+  setAuthPill(true, `Token OK: ${r.json.Name}`);
+  status(`Token OK for: ${r.json.Name}`);
+}
+
+/* ========= SESSIONS ========= */
+function formatSessionLabel(s) {
+  const client = s.Client || "UnknownClient";
+  const dev = s.DeviceName || "UnknownDevice";
+  const user = s.UserName || "UnknownUser";
+  const title = s.NowPlayingItem?.Name ? ` | ${s.NowPlayingItem.Name}` : "";
+  const pos = s.PlayState?.PositionTicks != null ? ` | ${Math.floor((s.PlayState.PositionTicks/1e7))}s` : "";
+  return `${client} • ${dev} • ${user}${title}${pos}`;
+}
+
+async function refreshSessions() {
+  if (!getToken()) { status("Refresh sessions: not logged in"); return; }
+
+  const r = await jfFetch(`/Sessions?ActiveWithinSeconds=300`, { method: "GET" });
+  if (!r.ok || !r.json) {
+    status(`Sessions failed: ${r.status} ${r.statusText}`);
+    status(`Body: ${r.text.slice(0,120)}`);
+    return;
+  }
+
+  sessionsCache = r.json || [];
+  const sel = el("sessionSelect");
+  sel.innerHTML = "";
+
+  const playable = sessionsCache.filter(s => s?.NowPlayingItem && s?.PlayState && s?.PlayState?.PositionTicks != null);
+  const saved = localStorage.getItem(STORE.chosenSessionId);
+  const best = saved && playable.find(x => x.Id === saved) ? saved : (playable[0]?.Id || null);
+  selectedSessionId = best;
+
+  playable.forEach(s => {
+    const opt = document.createElement("option");
+    opt.value = s.Id;
+    opt.textContent = formatSessionLabel(s);
+    sel.appendChild(opt);
+  });
+
+  if (selectedSessionId) sel.value = selectedSessionId;
+
+  status(`Sessions loaded: ${playable.length} playable`);
+}
+
+el("sessionSelect").addEventListener("change", () => {
+  selectedSessionId = el("sessionSelect").value || null;
+  if (selectedSessionId) localStorage.setItem(STORE.chosenSessionId, selectedSessionId);
+  status(`Selected session: ${selectedSessionId}`);
+
+  // Reset WS clock association so it re-locks to correct session/item
+  lastWSSec = null;
+  lastWSAt = 0;
+  lastWSItemId = null;
+  lastWSSessionId = null;
+
+  active = { itemId:null, mediaSourceId:null, subtitleIndex:null, title:null };
+});
+
+/* ========= SUBTITLE TRACK OVERRIDE ========= */
+function useClientSubtitle() { return el("useClientSubtitleToggle").checked; }
+function setUseClientSubtitle(v) {
+  el("useClientSubtitleToggle").checked = !!v;
+  localStorage.setItem(STORE.useClientSubtitle, (!!v).toString());
+  el("subtitleTrackSelect").disabled = !!v;
+}
+function getOverrideSubtitleIndex() {
+  const raw = localStorage.getItem(STORE.overrideSubtitleIndex);
+  if (raw == null) return null;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) ? n : null;
+}
+function setOverrideSubtitleIndex(n) { localStorage.setItem(STORE.overrideSubtitleIndex, String(n)); }
+
+el("useClientSubtitleToggle").addEventListener("change", () => {
+  setUseClientSubtitle(useClientSubtitle());
+  status(`Use client-selected subtitles: ${useClientSubtitle()}`);
+  active = { itemId:null, mediaSourceId:null, subtitleIndex:null, title:null };
+});
+el("subtitleTrackSelect").addEventListener("change", () => {
+  const idx = parseInt(el("subtitleTrackSelect").value, 10);
+  if (Number.isFinite(idx)) {
+    setOverrideSubtitleIndex(idx);
+    status(`Override subtitle track: #${idx}`);
+    active = { itemId:null, mediaSourceId:null, subtitleIndex:null, title:null };
+  }
+});
+el("btnReloadSubs").addEventListener("click", () => {
+  active = { itemId:null, mediaSourceId:null, subtitleIndex:null, title:null };
+  status("Forcing subtitle reload…");
+});
+
+async function refreshSubtitleTracksForItem(itemId, sessionSubtitleIndex) {
+  const userId = getUserId();
+  const r = await jfFetch(`/Items/${encodeURIComponent(itemId)}/PlaybackInfo?UserId=${encodeURIComponent(userId)}`, {
+    method: "POST",
+    body: JSON.stringify({ DeviceProfile: null })
+  });
+
+  if (!r.ok || !r.json) {
+    status(`PlaybackInfo failed: ${r.status} ${r.statusText}`);
+    subtitleStreams = [];
+    el("subtitleTrackSelect").innerHTML = "";
+    return;
+  }
+
+  const ms = r.json.MediaSources?.[0]?.MediaStreams || [];
+  subtitleStreams = ms.filter(x => (x.Type || "").toLowerCase() === "subtitle");
+
+  const sel = el("subtitleTrackSelect");
+  sel.innerHTML = "";
+  subtitleStreams.forEach(st => {
+    const opt = document.createElement("option");
+    opt.value = String(st.Index);
+    const title = st.DisplayTitle || `${st.Language || "und"} ${st.Codec || ""}`.trim();
+    opt.textContent = `#${st.Index} • ${title}`;
+    sel.appendChild(opt);
+  });
+
+  const override = getOverrideSubtitleIndex();
+  const preferred = (override != null && subtitleStreams.find(x => x.Index === override))
+    ? override
+    : (sessionSubtitleIndex != null ? sessionSubtitleIndex : (subtitleStreams[0]?.Index ?? 0));
+
+  if (subtitleStreams.length) {
+    sel.value = String(preferred);
+    setOverrideSubtitleIndex(preferred);
+  }
+
+  status(`PlaybackInfo: subtitle tracks=${subtitleStreams.length} (session sub: #${sessionSubtitleIndex})`);
+}
+
+/* ========= VTT ========= */
+function parseVtt(vtt) {
+  const lines = vtt.replace(/\r/g, "").split("\n");
+
+  const timeRe =
+    /(?:(\d{2,}):)?(\d{2}):(\d{2})[.,](\d{3})\s*\-\-\>\s*(?:(\d{2,}):)?(\d{2}):(\d{2})[.,](\d{3})/;
+
+
+  function toSec(hh, mm, ss, ms) {
+    const h = hh ? parseInt(hh, 10) : 0;
+    return (h * 3600) + (parseInt(mm, 10) * 60) + parseInt(ss, 10) + (parseInt(ms, 10) / 1000);
+  }
+
+  const out = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i].trim();
+
+    const m = timeRe.exec(line);
+    if (!m) { i++; continue; }
+
+    const start = toSec(m[1], m[2], m[3], m[4]);
+    const end   = toSec(m[5], m[6], m[7], m[8]);
+
+    i++;
+    const textLines = [];
+    while (i < lines.length && lines[i].trim() !== "") {
+      textLines.push(lines[i].replace(/<[^>]+>/g, "").trim());
+      i++;
+    }
+
+    const text = textLines.join(" ").replace(/\s+/g, " ").trim();
+    if (text && Number.isFinite(start) && Number.isFinite(end) && end >= start) {
+      out.push({ start, end, text });
+    }
+  }
+
+  // Ensure monotonic order even if file has oddities
+  out.sort((a, b) => a.start - b.start);
+
+  // Optional: remove exact duplicates
+  const dedup = [];
+  for (const c of out) {
+    const prev = dedup[dedup.length - 1];
+    if (!prev || prev.start !== c.start || prev.end !== c.end || prev.text !== c.text) dedup.push(c);
+  }
+
+  return dedup;
+}
+
+function isMostlyCoords(s) {
+  const txt = (s || "").trim();
+  if (!txt) return true;
+
+  // Common vector/path patterns: "m 1400 136 l 1741 135 ..."
+  // If it's a bunch of single-letter commands + numbers, skip it.
+  const tokens = txt.split(/\s+/);
+  if (tokens.length >= 10) {
+    const cmdCount = tokens.filter(x => /^[mMlLbBcCsSqQtTaAhHvVzZ]$/.test(x)).length;
+    const numCount = tokens.filter(x => /^-?\d+(\.\d+)?$/.test(x)).length;
+
+    // "m l l l ..." + many numbers is almost certainly drawing data
+    if (cmdCount >= 2 && numCount >= 6 && (cmdCount + numCount) / tokens.length > 0.75) return true;
+  }
+
+  // If it's overwhelmingly digits/symbols with very few letters, also skip
+  const letters = (txt.match(/[A-Za-z]/g) || []).length;
+  const digits  = (txt.match(/\d/g) || []).length;
+  if (digits > 20 && letters < 8) return true;
+
+  // If it literally starts with a path-ish command then numbers
+  if (/^\s*[mMlL]\s*-?\d/.test(txt) && digits > 10) return true;
+
+  return false;
+}
+
+function cleanText(t) {
+  let s = t || "";
+
+  // Remove ASS/SSA style tags like {\i1\b1} etc
+  s = s.replace(/\{[^}]*\}/g, "");
+
+  // Remove backslashes that sometimes escape stuff
+  s = s.replace(/\\/g, "");
+
+  // Strip HTML tags
+  s = s.replace(/<[^>]+>/g, "");
+
+  // Optional: remove bracketed sound cues
+  s = s.replace(/\[[^\]]+\]/g, "").replace(/\([^)]+\)/g, "");
+
+  s = s.replace(/\s+/g, " ").trim();
+
+  // NEW: skip vector/path garbage cues
+  if (isMostlyCoords(s)) return "";
+
+  // Clamp length
+  if (s.length > MAX_CHARS) s = s.slice(0, MAX_CHARS).trim() + "…";
+  return s;
+}
+
+
+async function loadCues(itemId, mediaSourceId, subtitleIndex) {
+  const path = `/Videos/${encodeURIComponent(itemId)}/${encodeURIComponent(mediaSourceId)}/Subtitles/${encodeURIComponent(subtitleIndex)}/Stream.vtt`;
+  const r = await jfFetch(path, { method: "GET", headers: { "Accept": "text/vtt" } });
+
+  if (!r.ok) {
+    status(`Subtitle fetch failed: ${r.status} ${r.statusText}`);
+    status(`Body: ${r.text.slice(0,160)}`);
+    return false;
+  }
+
+  el("vttPreview").textContent = r.text.slice(0, 1400);
+  cues = parseVtt(r.text);
+  lastSpokenIdx = -1;
+  pending = null;
+  speechSynthesis.cancel();
+
+  status(`Loaded ${cues.length} cues (sub #${subtitleIndex})`);
+  return true;
+}
+
+function findLatestCueAtTime(sec) {
+  if (!cues.length) return -1;
+
+  let lo = 0, hi = cues.length - 1, ans = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const t = cues[mid].start;
+    if (!Number.isFinite(t)) { hi = mid - 1; continue; }
+    if (t <= sec) { ans = mid; lo = mid + 1; }
+    else hi = mid - 1;
+  }
+  return ans;
+}
+
+
+/* ========= OFFSET ========= */
+function offsetKey() {
+  return `jf_offset_${active.itemId || "none"}_${active.subtitleIndex ?? "na"}_${active.mediaSourceId || "na"}`;
+}
+function setOffset(v, persist=true) {
+  const clamped = Math.max(-OFFSET_RANGE, Math.min(OFFSET_RANGE, v));
+  offsetSec = clamped;
+  el("offsetSlider").value = String(clamped);
+  el("offsetReadout").textContent = `${clamped >= 0 ? "+" : ""}${clamped.toFixed(2)}s`;
+  if (persist && active.itemId) localStorage.setItem(offsetKey(), String(clamped));
+}
+function loadOffset() {
+  if (!active.itemId) { setOffset(DEFAULT_OFFSET_SEC, false); return; }
+  const raw = localStorage.getItem(offsetKey());
+  if (raw == null) setOffset(DEFAULT_OFFSET_SEC, false);
+  else setOffset(parseFloat(raw), false);
+}
+function autoSyncEnabled() { return !!el("autoSyncToggle").checked; }
+el("offsetSlider").addEventListener("input", () => setOffset(parseFloat(el("offsetSlider").value), true));
+el("btnResetOffset").addEventListener("click", () => { setOffset(DEFAULT_OFFSET_SEC, true); avgLateSec = 0; status("Offset reset"); });
+
+/* ========= VOICE ========= */
+let voices = [];
+let selectedVoice = null;
+
+function updateVoiceInfo() {
+  const name = selectedVoice ? `${selectedVoice.name} (${selectedVoice.lang})` : "none";
+  el("voiceInfo").textContent = `Voices: ${voices.length} | Selected: ${name} | speaking=${speechSynthesis.speaking}`;
+}
+function chooseDefaultVoiceIndex() {
+  const savedName = localStorage.getItem(STORE.voiceName);
+  if (savedName) {
+    const i = voices.findIndex(v => v.name === savedName);
+    if (i >= 0) return i;
+  }
+  let i = voices.findIndex(v => v.name.toLowerCase().includes("microsoft mark"));
+  if (i >= 0) return i;
+  i = voices.findIndex(v => v.name.includes("Microsoft") && v.lang.startsWith("en"));
+  if (i >= 0) return i;
+  i = voices.findIndex(v => v.lang.startsWith("en"));
+  if (i >= 0) return i;
+  return voices.length ? 0 : -1;
+}
+function loadVoices() {
+  voices = speechSynthesis.getVoices() || [];
+  const sel = el("voiceSelect");
+  sel.innerHTML = "";
+  voices.forEach((v, i) => {
+    const opt = document.createElement("option");
+    opt.value = String(i);
+    opt.textContent = `${v.name} (${v.lang})`;
+    sel.appendChild(opt);
+  });
+  const idx = chooseDefaultVoiceIndex();
+  if (idx >= 0) { sel.value = String(idx); selectedVoice = voices[idx]; }
+  else selectedVoice = null;
+  updateVoiceInfo();
+}
+speechSynthesis.onvoiceschanged = () => { loadVoices(); status("Voices updated."); };
+el("voiceSelect").addEventListener("change", () => {
+  const idx = Number(el("voiceSelect").value);
+  selectedVoice = voices[idx] || null;
+  if (selectedVoice) localStorage.setItem(STORE.voiceName, selectedVoice.name);
+  status(`Voice set to: ${selectedVoice?.name || "none"}`);
+  updateVoiceInfo();
+});
+loadVoices(); setTimeout(loadVoices, 250); setTimeout(loadVoices, 1000);
+
+function speakOrQueue(text, cueStartSec, nowSec) {
+  text = (text || "").trim();
+  if (!text) return;
+
+  if (DONT_INTERRUPT && speechSynthesis.speaking) {
+    pending = { text, cueStartSec, nowSec, itemId: active.itemId };
+    updateVoiceInfo();
+    return;
+  }
+
+  speechSynthesis.cancel();
+
+  const u = new SpeechSynthesisUtterance(text);
+  if (selectedVoice) u.voice = selectedVoice;
+  u.rate = parseFloat(el("rate").value || "1.25");
+  u.pitch = 1;
+  u.volume = 1;
+
+  u.onend = () => {
+    if (pending && pending.itemId === active.itemId) {
+      const p = pending; pending = null;
+      const stale = (p.nowSec - p.cueStartSec) > STALE_AFTER_SEC;
+      if (!stale) speakOrQueue(p.text, p.cueStartSec, p.nowSec);
+    }
+    updateVoiceInfo();
+  };
+  u.onerror = (e) => { status(`Speech error: ${e.error || "unknown"}`); updateVoiceInfo(); };
+
+  speechSynthesis.speak(u);
+  el("current").textContent = text;
+  updateVoiceInfo();
+}
+el("btnTest").addEventListener("click", () => {
+  pending = null; speechSynthesis.cancel();
+  speakOrQueue("Test voice. Subtitles will be read aloud.", 0, 0);
+  status("Test voice.");
+});
+
+/* ========= CLOCK SELECTION ========= */
+function getClockSecForSelectedSession(sessionSec, sessionId, itemId) {
+  // Prefer WS if:
+  // - we got a WS tick recently (<2s ago)
+  // - it matches the selected session (if provided)
+  // - if itemId is known, prefer matching item
+  const nowPerf = performance.now();
+  const wsFresh = lastWSSec != null && (nowPerf - lastWSAt) < 2000;
+
+  let useWS = false;
+  if (wsFresh) {
+    if (sessionId && lastWSSessionId && lastWSSessionId === sessionId) useWS = true;
+    else if (!sessionId) useWS = true;
+
+    if (useWS && itemId && lastWSItemId && lastWSItemId !== itemId) {
+      // WS is for a different item; don't use it
+      useWS = false;
+    }
+  }
+
+  if (useWS) {
+    el("clockInfo").textContent = `Clock: WebSocket (${lastWSSec.toFixed(2)}s)`;
+    return lastWSSec;
+  }
+
+  if (typeof sessionSec === "number") {
+    el("clockInfo").textContent = `Clock: Sessions (${sessionSec.toFixed(2)}s)`;
+    return sessionSec;
+  }
+
+  el("clockInfo").textContent = `Clock: none`;
+  return null;
+}
+
+/* ========= MAIN LOOP ========= */
+async function tick() {
+  if (!getToken()) { status("Not logged in."); return; }
+
+  const r = await jfFetch(`/Sessions?ActiveWithinSeconds=300`, { method: "GET" });
+  if (!r.ok || !r.json) {
+    status(`Sessions failed: ${r.status} ${r.statusText}`);
+    return;
+  }
+  sessionsCache = r.json || [];
+
+  const playable = sessionsCache.filter(s => s?.NowPlayingItem && s?.PlayState && s?.PlayState?.PositionTicks != null);
+  if (!playable.length) { status("No active playback sessions found."); return; }
+
+  if (!selectedSessionId || !playable.find(x => x.Id === selectedSessionId)) {
+    selectedSessionId = localStorage.getItem(STORE.chosenSessionId);
+    if (!selectedSessionId || !playable.find(x => x.Id === selectedSessionId)) {
+      selectedSessionId = playable[0].Id;
+      localStorage.setItem(STORE.chosenSessionId, selectedSessionId);
+    }
+    // rebuild select UI occasionally
+    const sel = el("sessionSelect");
+    if (!sel.options.length) await refreshSessions();
+  }
+
+  const s = playable.find(x => x.Id === selectedSessionId) || playable[0];
+
+  const itemId = s.NowPlayingItem.Id;
+  const title = s.NowPlayingItem.Name || itemId;
+  const mediaSourceId = s.PlayState.MediaSourceId || itemId;
+  const sessionSubtitleIndex = s.PlayState.SubtitleStreamIndex;
+
+  const sessionSec = s.PlayState.PositionTicks / 10_000_000;
+  lastSessionSec = sessionSec;
+
+  // Pick clock
+  const sec = getClockSecForSelectedSession(sessionSec, s.Id, itemId);
+  if (sec == null) return;
+
+  // Determine subtitle index to use
+  let subtitleIndex = sessionSubtitleIndex;
+  if (!useClientSubtitle()) {
+    const override = getOverrideSubtitleIndex();
+    if (override != null) subtitleIndex = override;
+  }
+  if (subtitleIndex == null || subtitleIndex < 0) {
+    status(`"${title}" has no subtitle selected (or override not set).`);
+    return;
+  }
+
+  const changed = active.itemId !== itemId || active.mediaSourceId !== mediaSourceId || active.subtitleIndex !== subtitleIndex;
+  if (changed) {
+    active = { itemId, mediaSourceId, subtitleIndex, title };
+    status(`Now playing: ${title}`);
+    status(`Session: ${s.Client} • ${s.DeviceName} (Id=${s.Id})`);
+    status(`MediaSourceId=${mediaSourceId} SessionSub=${sessionSubtitleIndex} UsingSub=${subtitleIndex}`);
+
+    await refreshSubtitleTracksForItem(itemId, sessionSubtitleIndex);
+
+    const ok = await loadCues(itemId, mediaSourceId, subtitleIndex);
+    if (!ok) return;
+
+    loadOffset();
+    avgLateSec = 0;
+  }
+
+  if (!cues.length) return;
+
+  const tt = sec + offsetSec;
+  const latestIdx = findLatestCueAtTime(tt);
+
+  // debug, but not spammy: only every ~1s
+  const dbgKey = Math.floor(tt);
+  if (!tick._lastDbg || tick._lastDbg !== dbgKey) {
+    tick._lastDbg = dbgKey;
+    const next = cues[latestIdx + 1];
+	const nextStart = next?.start;
+	const nextDelta = (Number.isFinite(nextStart) ? (nextStart - tt) : null);
+
+	status(`DBG: sec=${sec.toFixed(2)} tt=${tt.toFixed(2)} latestIdx=${latestIdx} / cues=${cues.length} | nextStart=${Number.isFinite(nextStart) ? nextStart.toFixed(2) : "n/a"} (${nextDelta!=null ? nextDelta.toFixed(2) : "n/a"}s ahead) (wsFresh=${(performance.now()-lastWSAt<2000)})`);
+  }
+
+  if (latestIdx < 0) return;
+
+  let nextIdx = Math.max(lastSpokenIdx + 1, 0);
+
+  if (nextIdx <= latestIdx && cues[nextIdx].start < (tt - CATCHUP_GRACE)) {
+    nextIdx = latestIdx;
+    status(`Catch-up jump -> cue #${nextIdx}`);
+  }
+
+  if (tt >= (cues[nextIdx].start - PREROLL_SEC)) {
+    const text = cleanText(cues[nextIdx].text);
+    if (!text) { lastSpokenIdx = nextIdx; return; }
+
+    const lateBy = tt - cues[nextIdx].start;
+
+    if (autoSyncEnabled()) {
+      avgLateSec = (1 - LATE_EMA_ALPHA) * avgLateSec + LATE_EMA_ALPHA * lateBy;
+      const err = (avgLateSec - LATE_TARGET_SEC);
+      if (Math.abs(err) > AUTO_DEADBAND) {
+        const step = Math.max(-AUTO_MAX_STEP, Math.min(AUTO_MAX_STEP, err * AUTO_STEP_GAIN));
+        setOffset(offsetSec - step, true);
+      }
+    }
+
+    speakOrQueue(text, cues[nextIdx].start, tt);
+    lastSpokenIdx = nextIdx;
+  }
+}
+
+function start() {
+  stop();
+  const ms = Math.max(150, Number(el("pollMs").value || 200));
+  status(`Starting tick every ${ms}ms`);
+  timer = setInterval(() => tick().catch(e => status(`Tick error: ${String(e)}`)), ms);
+  tick().catch(e => status(`Tick error: ${String(e)}`));
+}
+function stop() {
+  if (timer) { clearInterval(timer); timer = null; status("Stopped."); }
+}
+
+/* ========= UI WIRING ========= */
+el("btnLogin").addEventListener("click", () => login().catch(e => status(`Login error: ${String(e)}`)));
+el("btnLogout").addEventListener("click", logout);
+el("btnWhoAmI").addEventListener("click", () => whoami().catch(e => status(`WhoAmI error: ${String(e)}`)));
+el("btnRefreshSessions").addEventListener("click", () => refreshSessions().catch(e => status(`Refresh sessions error: ${String(e)}`)));
+el("btnStart").addEventListener("click", start);
+el("btnStop").addEventListener("click", stop);
+
+/* ========= INIT ========= */
+(function init() {
+  const server = localStorage.getItem(STORE.server) || "";
+  const app = localStorage.getItem(STORE.app) || "SubtitleTTSWeb";
+  el("serverUrl").value = server;
+  el("appName").value = app;
+
+  const savedUseClient = localStorage.getItem(STORE.useClientSubtitle);
+  setUseClientSubtitle(savedUseClient == null ? true : (savedUseClient === "true"));
+
+  selectedSessionId = localStorage.getItem(STORE.chosenSessionId) || null;
+
+  if (getToken()) setAuthPill(true, "Token loaded (localStorage)");
+  else setAuthPill(false, "Not logged in");
+
+  setOffset(DEFAULT_OFFSET_SEC, false);
+
+  if (getToken() && getServer()) {
+    connectWS();
+    refreshSessions().catch(() => {});
+  }
+
+  status("Ready. WS clock will fix desktop PositionTicks freezes.");
+})();
+</script>
+</body>
+</html>
