@@ -29,6 +29,32 @@
     label.switch input { width: 18px; height: 18px; }
     .grid2 { display:grid; grid-template-columns: 1fr; gap:10px; }
     @media (min-width: 720px) { .grid2 { grid-template-columns: 1fr 1fr; } }
+
+    /* ===== Cross-domain / CORS help box ===== */
+    .helpBox {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border: 1px solid rgba(255,255,255,0.18);
+      border-radius: 12px;
+      background: rgba(255,255,255,0.06);
+    }
+    .helpBox > summary {
+      cursor: pointer;
+      user-select: none;
+      font-weight: 650;
+    }
+    .helpInner { margin-top: 10px; line-height: 1.35; }
+    .helpInner h3 { margin: 12px 0 6px; font-size: 13px; }
+    .helpNote { opacity: 0.9; }
+    .codeBlock {
+      overflow-x: auto;
+      padding: 10px;
+      border-radius: 10px;
+      background: rgba(0,0,0,0.35);
+      border: 1px solid rgba(255,255,255,0.12);
+      white-space: pre;
+      word-break: normal;
+    }
   </style>
 </head>
 
@@ -73,6 +99,71 @@
     <div class="small muted" style="margin-top:8px;">
       Token stored locally. WebSocket uses the same token to receive PlaybackProgress events.
     </div>
+
+    <!-- ===== Cross-domain / CORS help (added) ===== -->
+    <details class="helpBox" id="crossDomainHelp">
+      <summary>Running this page on a different domain/port than Jellyfin? (CORS + HTTPS help)</summary>
+      <div class="helpInner">
+        <p>
+          If this web app is opened from a different <b>origin</b> than your Jellyfin server
+          (different domain, subdomain, port, or http/https), the browser may block requests.
+        </p>
+
+        <h3>1) Allow this site in Jellyfin (CORS)</h3>
+        <ol>
+          <li>Open Jellyfin <b>Dashboard</b></li>
+          <li>Go to <b>Networking</b></li>
+          <li>Find <b>CORS / Allowed origins</b> (wording varies)</li>
+          <li>Add your site origin exactly (scheme + domain + port), e.g.:
+            <ul>
+              <li><code>https://yourname.github.io</code></li>
+              <li><code>https://yourdomain.com</code></li>
+              <li><code>http://localhost:8080</code></li>
+            </ul>
+          </li>
+        </ol>
+
+        <p class="helpNote">
+          Origins must match exactly. <code>https://site.com</code> is not the same as
+          <code>http://site.com</code> or <code>https://site.com:8443</code>.
+        </p>
+
+        <h3>2) Avoid “Mixed Content” (HTTPS vs HTTP)</h3>
+        <ul>
+          <li>If this page is loaded as <code>https://</code>, the browser may block calls to a Jellyfin server on <code>http://</code>.</li>
+          <li>Best results: use <code>https://</code> for both the page and Jellyfin.</li>
+          <li>WebSockets: <code>https://</code> pages require <code>wss://</code> (not <code>ws://</code>).</li>
+        </ul>
+
+        <h3>3) If you can’t enable CORS: use a reverse proxy (same-origin)</h3>
+        <p>
+          Browsers behave best when Jellyfin and this page share the same origin.
+          One approach is to proxy Jellyfin under your site path, for example:
+          <code>https://yourdomain.com/jellyfin/</code>
+        </p>
+
+        <div class="codeBlock"><code># Nginx example (WebSocket support included)
+location /jellyfin/ {
+  proxy_pass http://192.168.0.95:8096/;
+  proxy_set_header Host $host;
+  proxy_set_header X-Real-IP $remote_addr;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Proto $scheme;
+
+  proxy_http_version 1.1;
+  proxy_set_header Upgrade $http_upgrade;
+  proxy_set_header Connection "upgrade";
+}</code></div>
+
+        <h3>Troubleshooting</h3>
+        <ul>
+          <li>Open DevTools → <b>Console</b> and look for: <code>CORS policy</code>, <code>Mixed Content</code>, or WebSocket errors.</li>
+          <li>Make sure the Jellyfin URL you entered is reachable from your device (LAN vs public hostname).</li>
+          <li>Some browser extensions can block requests (adblock/privacy tools).</li>
+        </ul>
+      </div>
+    </details>
+    <!-- ===== /Cross-domain / CORS help ===== -->
   </div>
 
   <div class="card">
@@ -586,9 +677,7 @@ async function refreshSubtitleTracksForItem(itemId, sessionSubtitleIndex) {
 function parseVtt(vtt) {
   const lines = vtt.replace(/\r/g, "").split("\n");
 
-  const timeRe =
-    /(?:(\d{2,}):)?(\d{2}):(\d{2})[.,](\d{3})\s*\-\-\>\s*(?:(\d{2,}):)?(\d{2}):(\d{2})[.,](\d{3})/;
-
+  const timeRe = /(?:(\d{2,}):)?(\d{2}):(\d{2})[.,](\d{3})\s*-->\s*(?:(\d{2,}):)?(\d{2}):(\d{2})[.,](\d{3})/;
 
   function toSec(hh, mm, ss, ms) {
     const h = hh ? parseInt(hh, 10) : 0;
@@ -684,7 +773,6 @@ function cleanText(t) {
   return s;
 }
 
-
 async function loadCues(itemId, mediaSourceId, subtitleIndex) {
   const path = `/Videos/${encodeURIComponent(itemId)}/${encodeURIComponent(mediaSourceId)}/Subtitles/${encodeURIComponent(subtitleIndex)}/Stream.vtt`;
   const r = await jfFetch(path, { method: "GET", headers: { "Accept": "text/vtt" } });
@@ -718,7 +806,6 @@ function findLatestCueAtTime(sec) {
   }
   return ans;
 }
-
 
 /* ========= OFFSET ========= */
 function offsetKey() {
@@ -936,10 +1023,10 @@ async function tick() {
   if (!tick._lastDbg || tick._lastDbg !== dbgKey) {
     tick._lastDbg = dbgKey;
     const next = cues[latestIdx + 1];
-	const nextStart = next?.start;
-	const nextDelta = (Number.isFinite(nextStart) ? (nextStart - tt) : null);
+    const nextStart = next?.start;
+    const nextDelta = (Number.isFinite(nextStart) ? (nextStart - tt) : null);
 
-	status(`DBG: sec=${sec.toFixed(2)} tt=${tt.toFixed(2)} latestIdx=${latestIdx} / cues=${cues.length} | nextStart=${Number.isFinite(nextStart) ? nextStart.toFixed(2) : "n/a"} (${nextDelta!=null ? nextDelta.toFixed(2) : "n/a"}s ahead) (wsFresh=${(performance.now()-lastWSAt<2000)})`);
+    status(`DBG: sec=${sec.toFixed(2)} tt=${tt.toFixed(2)} latestIdx=${latestIdx} / cues=${cues.length} | nextStart=${Number.isFinite(nextStart) ? nextStart.toFixed(2) : "n/a"} (${nextDelta!=null ? nextDelta.toFixed(2) : "n/a"}s ahead) (wsFresh=${(performance.now()-lastWSAt<2000)})`);
   }
 
   if (latestIdx < 0) return;
