@@ -1071,10 +1071,25 @@ function cleanText(t) {
   s = s.replace(/\\/g, "");
   s = s.replace(/<[^>]+>/g, "");
   s = s.replace(/\[[^\]]+\]/g, "").replace(/\([^)]+\)/g, "");
+  s = normalizeInterjections(s);
+  s = s.replace(/-([?!])/g, "$1");
   s = s.replace(/\s+/g, " ").trim();
   if (isMostlyCoords(s)) return "";
   if (s.length > MAX_CHARS) s = s.slice(0, MAX_CHARS).trim() + "…";
   return s;
+}
+
+function normalizeInterjections(s) {
+  const rules = [
+    { re: /\b[hH]uh-?\s*\?/g, to: "huh?" },
+    { re: /\b[hH]uh-?\b/g, to: "huh…" },
+    { re: /\b[wW]h-?\s*\?/g, to: "wha?" },
+    { re: /\b[wW]h\?/g, to: "wha?" },
+    { re: /\b[tT]ch\b/g, to: "tchh" },
+  ];
+  let out = s;
+  for (const r of rules) out = out.replace(r.re, r.to);
+  return out;
 }
 
 async function loadCues(itemId, mediaSourceId, subtitleIndex) {
