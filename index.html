@@ -4,145 +4,471 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Jellyfin Subtitle TTS (BYO Server + Login)</title>
-  <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; background: #0b0e14; color: #e8eefc; }
-    header { padding: 14px 16px; background: #111827; border-bottom: 1px solid #223; }
-    h1 { margin: 0; font-size: 16px; }
-    .sub { margin-top: 6px; font-size: 12px; opacity: 0.85; line-height: 1.35; }
-    main { padding: 12px 16px; display: grid; gap: 12px; max-width: 1100px; margin: 0 auto; }
-    .card { background: #0f172a; border: 1px solid #223; border-radius: 12px; padding: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.25); }
-    .row { display: grid; gap: 12px; grid-template-columns: 1fr; }
-    @media (min-width: 900px) { .row { grid-template-columns: 1fr 1fr; } }
-    .pill { display:inline-block; font-size: 12px; padding: 4px 8px; border-radius: 999px; border: 1px solid #223; background: #0b1222; }
-    pre { white-space: pre-wrap; word-break: break-word; background: #070a10; border: 1px solid #223; border-radius: 10px; padding: 10px; margin: 0; max-height: 320px; overflow: auto; }
-    #current { font-size: 18px; line-height: 1.4; padding: 10px; background: #0b1222; border: 1px solid #223; border-radius: 10px; min-height: 56px; }
-    button { background: #2563eb; color: white; border: 0; border-radius: 10px; padding: 10px 12px; font-weight: 650; cursor: pointer; }
-    button.secondary { background: #334155; }
-    input, select { background: #0b1222; color:#e8eefc; border: 1px solid #223; border-radius: 10px; padding: 10px 12px; }
-    input[type="number"] { width: 120px; }
-    select { min-width: 260px; }
-    input[type="range"] { width: 260px; padding: 0; height: 26px; }
-    .small { font-size: 12px; opacity: 0.85; line-height: 1.35; }
-    .muted { opacity: 0.8; }
-    .kv { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
-    label.switch { display:flex; gap:8px; align-items:center; cursor:pointer; user-select:none; }
-    label.switch input { width: 18px; height: 18px; }
-    .grid2 { display:grid; grid-template-columns: 1fr; gap:10px; }
-    @media (min-width: 720px) { .grid2 { grid-template-columns: 1fr 1fr; } }
 
-    /* ===== Cross-domain / CORS help box ===== */
-    .helpBox {
+  <style>
+    :root{
+      --bg0:#070A12;
+      --bg1:#0b1020;
+      --fg:#eaf1ff;
+      --muted:#9aa7bf;
+
+      --a1:#7c7cff;
+      --a2:#22d3ee;
+      --a3:#34d399;
+      --a4:#f472b6;
+
+      --glass: rgba(255,255,255,.06);
+      --border: rgba(255,255,255,.14);
+      --border2: rgba(255,255,255,.10);
+      --shadow: rgba(0,0,0,.55);
+      --shadowSoft: rgba(0,0,0,.25);
+
+      --r-lg: 18px;
+      --r-md: 14px;
+      --r-sm: 12px;
+    }
+
+    *{ box-sizing:border-box; }
+    html,body{ height:100%; }
+
+    body{
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif;
+      margin:0;
+      color:var(--fg);
+      background:
+        radial-gradient(1200px 600px at 10% -10%, #1f2a44 0%, transparent 60%),
+        radial-gradient(900px 600px at 95% 10%, #091a2b 0%, transparent 55%),
+        linear-gradient(180deg, var(--bg0), var(--bg1));
+      overflow-x:hidden;
+    }
+
+    /* Floating neon blobs */
+    .blob{
+      position:fixed;
+      width:560px;
+      height:560px;
+      filter: blur(44px);
+      opacity:.55;
+      pointer-events:none;
+      mix-blend-mode: screen;
+      animation: drift 16s ease-in-out infinite;
+      z-index:0;
+    }
+    .blob.b1{
+      left:-180px; top:-190px;
+      background: radial-gradient(circle at 30% 30%, rgba(124,124,255,.95), transparent 60%);
+    }
+    .blob.b2{
+      right:-240px; top:40px;
+      background: radial-gradient(circle at 40% 40%, rgba(34,211,238,.95), transparent 62%);
+      animation-duration: 18s;
+      animation-delay: -4s;
+    }
+    .blob.b3{
+      left:18%; bottom:-300px;
+      background: radial-gradient(circle at 35% 35%, rgba(52,211,153,.80), transparent 62%);
+      animation-duration: 20s;
+      animation-delay: -7s;
+    }
+    .blob.b4{
+      right:10%; bottom:-320px;
+      background: radial-gradient(circle at 35% 35%, rgba(244,114,182,.55), transparent 62%);
+      animation-duration: 22s;
+      animation-delay: -10s;
+    }
+
+    @keyframes drift{
+      0%   { transform: translate(0,0) scale(1); }
+      50%  { transform: translate(34px,-22px) scale(1.08); }
+      100% { transform: translate(0,0) scale(1); }
+    }
+
+    header{
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      padding: 16px 16px 14px;
+      background: rgba(255,255,255,.05);
+      border-bottom: 1px solid rgba(255,255,255,.12);
+      backdrop-filter: blur(16px) saturate(150%);
+      -webkit-backdrop-filter: blur(16px) saturate(150%);
+    }
+
+    h1{
+      margin:0;
+      font-size: 16px;
+      letter-spacing: .2px;
+      display:flex;
+      align-items:center;
+      gap:10px;
+      flex-wrap: wrap;
+    }
+
+    .titleGlow{
+      background: linear-gradient(90deg, #ffffff, var(--a1), var(--a2));
+      background-clip:text;
+      -webkit-background-clip:text;
+      color: transparent;
+      font-weight: 900;
+    }
+
+    .sub{
+      margin-top: 8px;
+      font-size: 12px;
+      color: rgba(154,167,191,.92);
+      line-height: 1.35;
+    }
+
+    main{
+      position: relative;
+      z-index: 1;
+      padding: 14px 16px 20px;
+      display:grid;
+      gap: 12px;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    .card{
+      background: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.03));
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      padding: 14px;
+      box-shadow: 0 24px 70px var(--shadowSoft), inset 0 1px 0 rgba(255,255,255,.06);
+      backdrop-filter: blur(14px) saturate(140%);
+      -webkit-backdrop-filter: blur(14px) saturate(140%);
+      position:relative;
+      overflow:hidden;
+    }
+
+    /* Neon edge ring */
+    .card::before{
+      content:"";
+      position:absolute;
+      inset:-1px;
+      border-radius: inherit;
+      background: linear-gradient(120deg,
+        transparent 22%,
+        rgba(124,124,255,.40),
+        rgba(34,211,238,.40),
+        rgba(52,211,153,.28),
+        transparent 78%
+      );
+      opacity:.35;
+      pointer-events:none;
+
+      mask: linear-gradient(#000,#000) content-box, linear-gradient(#000,#000);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+      padding:1px;
+    }
+
+    /* Soft shimmer */
+    .card::after{
+      content:"";
+      position:absolute;
+      inset:-120px -220px;
+      background: linear-gradient(120deg, transparent 35%, rgba(255,255,255,.12), transparent 65%);
+      transform: rotate(10deg) translateX(-55%);
+      animation: sheen 7.2s ease-in-out infinite;
+      pointer-events:none;
+      opacity:.22;
+    }
+    @keyframes sheen{
+      0%, 55% { transform: rotate(10deg) translateX(-55%); }
+      100%    { transform: rotate(10deg) translateX(35%); }
+    }
+
+    .row{
+      display:grid;
+      gap: 12px;
+      grid-template-columns: 1fr;
+    }
+    @media (min-width: 900px){
+      .row{ grid-template-columns: 1fr 1fr; }
+    }
+
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      font-size: 12px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.06);
+      color: rgba(234,241,255,.92);
+      user-select:none;
+    }
+
+    pre{
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: rgba(0,0,0,.26);
+      border: 1px solid rgba(255,255,255,.10);
+      border-radius: var(--r-md);
+      padding: 12px;
+      margin: 0;
+      max-height: 320px;
+      overflow:auto;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+    }
+
+    #current{
+      font-size: 18px;
+      line-height: 1.4;
+      padding: 12px;
+      background: rgba(255,255,255,.06);
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: var(--r-md);
+      min-height: 56px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
+    }
+
+    button{
+      border: 0;
+      border-radius: var(--r-md);
+      padding: 10px 12px;
+      font-weight: 800;
+      cursor: pointer;
+      color:#071018;
+      background: linear-gradient(135deg, var(--a1), var(--a2), var(--a3));
+      box-shadow:
+        0 14px 40px rgba(34,211,238,.22),
+        inset 0 1px 0 rgba(255,255,255,.55);
+      transition: transform .14s ease, filter .14s ease, box-shadow .14s ease;
+      position:relative;
+      overflow:hidden;
+    }
+
+    button::before{
+      content:"";
+      position:absolute;
+      inset:0;
+      background: linear-gradient(110deg, transparent 10%, rgba(255,255,255,.55), transparent 55%);
+      transform: translateX(-120%);
+      opacity:.28;
+      transition: transform .5s ease;
+      pointer-events:none;
+    }
+
+    button:hover{
+      transform: translateY(-2px);
+      filter: saturate(112%);
+      box-shadow:
+        0 20px 56px rgba(34,211,238,.30),
+        inset 0 1px 0 rgba(255,255,255,.62);
+    }
+    button:hover::before{ transform: translateX(120%); }
+    button:active{ transform: translateY(0); }
+
+    button.secondary{
+      color: rgba(234,241,255,.92);
+      background: rgba(255,255,255,.08);
+      border: 1px solid rgba(255,255,255,.14);
+      box-shadow: 0 10px 26px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.06);
+    }
+    button.secondary::before{ display:none; }
+
+    input, select{
+      background: rgba(255,255,255,.06);
+      color: var(--fg);
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: var(--r-md);
+      padding: 10px 12px;
+      outline: none;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+      transition: border-color .14s ease, box-shadow .14s ease;
+    }
+    input:focus, select:focus{
+      border-color: rgba(34,211,238,.35);
+      box-shadow: 0 0 0 4px rgba(34,211,238,.12);
+    }
+
+    input[type="number"]{ width: 120px; }
+    select{ min-width: 260px; }
+    input[type="range"]{
+      width: 260px;
+      padding: 0;
+      height: 26px;
+      accent-color: var(--a2);
+    }
+
+    .small{
+      font-size: 12px;
+      color: rgba(154,167,191,.92);
+      line-height: 1.35;
+    }
+    .muted{ opacity: .9; }
+
+    .kv{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:center;
+    }
+
+    label.switch{
+      display:flex;
+      gap:8px;
+      align-items:center;
+      cursor:pointer;
+      user-select:none;
+    }
+    label.switch input{
+      width: 18px;
+      height: 18px;
+      accent-color: var(--a3);
+    }
+
+    .grid2{
+      display:grid;
+      grid-template-columns: 1fr;
+      gap:10px;
+    }
+    @media (min-width: 720px){
+      .grid2{ grid-template-columns: 1fr 1fr; }
+    }
+
+    /* Cross-domain / CORS help box */
+    .helpBox{
       margin-top: 12px;
       padding: 10px 12px;
-      border: 1px solid rgba(255,255,255,0.18);
-      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: var(--r-lg);
       background: rgba(255,255,255,0.06);
     }
-    .helpBox > summary {
-      cursor: pointer;
-      user-select: none;
-      font-weight: 650;
+    .helpBox > summary{
+      cursor:pointer;
+      user-select:none;
+      font-weight: 800;
+      color: rgba(234,241,255,.92);
+      list-style:none;
     }
-    .helpInner { margin-top: 10px; line-height: 1.35; }
-    .helpInner h3 { margin: 12px 0 6px; font-size: 13px; }
-    .helpNote { opacity: 0.9; }
-    .codeBlock {
+    .helpBox > summary::-webkit-details-marker{ display:none; }
+    .helpInner{ margin-top: 10px; line-height: 1.35; color: rgba(154,167,191,.92); }
+    .helpInner h3{ margin: 12px 0 6px; font-size: 13px; color: rgba(234,241,255,.92); }
+    .helpNote{ opacity: 0.95; }
+
+    .codeBlock{
       overflow-x: auto;
-      padding: 10px;
-      border-radius: 10px;
-      background: rgba(0,0,0,0.35);
+      padding: 12px;
+      border-radius: var(--r-md);
+      background: rgba(0,0,0,0.28);
       border: 1px solid rgba(255,255,255,0.12);
       white-space: pre;
       word-break: normal;
+    }
+
+    /* Nice scrollbars */
+    *::-webkit-scrollbar{ height: 10px; width: 10px; }
+    *::-webkit-scrollbar-thumb{
+      background: rgba(255,255,255,.14);
+      border-radius: 999px;
+      border: 2px solid rgba(0,0,0,.20);
+    }
+    *::-webkit-scrollbar-track{ background: rgba(0,0,0,.18); border-radius: 999px; }
+
+    @media (prefers-reduced-motion: reduce){
+      .blob, .card::after { animation:none !important; }
+      button::before{ transition:none; }
     }
   </style>
 </head>
 
 <body>
-<header>
-  <h1>🎧 Jellyfin Subtitle TTS (WebSocket-synced)</h1>
-  <div class="sub">
-    Fixes “desktop session time freezes” by using Jellyfin’s websocket playback progress events as the clock.
-  </div>
-</header>
+  <div class="blob b1"></div>
+  <div class="blob b2"></div>
+  <div class="blob b3"></div>
+  <div class="blob b4"></div>
 
-<main>
-  <div class="card">
-    <div class="small">Account</div>
-    <div class="grid2" style="margin-top:8px;">
-      <div>
-        <div class="small">Server URL</div>
-        <input id="serverUrl" type="text" placeholder="http://192.168.0.95:8096" />
-      </div>
-      <div>
-        <div class="small">App name</div>
-        <input id="appName" type="text" value="SubtitleTTSWeb" />
-      </div>
-      <div>
-        <div class="small">Username</div>
-        <input id="username" type="text" placeholder="username" />
-      </div>
-      <div>
-        <div class="small">Password</div>
-        <input id="password" type="password" placeholder="password" />
-      </div>
+  <header>
+    <h1>
+      <span class="titleGlow">🎧 Jellyfin Subtitle TTS</span>
+      <span class="pill">WebSocket-synced</span>
+    </h1>
+    <div class="sub">
+      Fixes “desktop session time freezes” by using Jellyfin’s websocket playback progress events as the clock.
     </div>
+  </header>
 
-    <div class="kv" style="margin-top:10px;">
-      <button id="btnLogin">Log in</button>
-      <button id="btnLogout" class="secondary">Log out</button>
-      <button id="btnWhoAmI" class="secondary">Check token</button>
-      <span class="pill" id="authPill">Not logged in</span>
-      <span class="pill" id="wsPill">WS: disconnected</span>
-    </div>
+  <main>
+    <div class="card">
+      <div class="small">Account</div>
+      <div class="grid2" style="margin-top:8px;">
+        <div>
+          <div class="small">Server URL</div>
+          <input id="serverUrl" type="text" placeholder="http://192.168.0.95:8096" />
+        </div>
+        <div>
+          <div class="small">App name</div>
+          <input id="appName" type="text" value="SubtitleTTSWeb" />
+        </div>
+        <div>
+          <div class="small">Username</div>
+          <input id="username" type="text" placeholder="username" />
+        </div>
+        <div>
+          <div class="small">Password</div>
+          <input id="password" type="password" placeholder="password" />
+        </div>
+      </div>
 
-    <div class="small muted" style="margin-top:8px;">
-      Token stored locally. WebSocket uses the same token to receive PlaybackProgress events.
-    </div>
+      <div class="kv" style="margin-top:10px;">
+        <button id="btnLogin">Log in</button>
+        <button id="btnLogout" class="secondary">Log out</button>
+        <button id="btnWhoAmI" class="secondary">Check token</button>
+        <span class="pill" id="authPill">Not logged in</span>
+        <span class="pill" id="wsPill">WS: disconnected</span>
+      </div>
 
-    <!-- ===== Cross-domain / CORS help (added) ===== -->
-    <details class="helpBox" id="crossDomainHelp">
-      <summary>Running this page on a different domain/port than Jellyfin? (CORS + HTTPS help)</summary>
-      <div class="helpInner">
-        <p>
-          If this web app is opened from a different <b>origin</b> than your Jellyfin server
-          (different domain, subdomain, port, or http/https), the browser may block requests.
-        </p>
+      <div class="small muted" style="margin-top:8px;">
+        Token stored locally. WebSocket uses the same token to receive PlaybackProgress events.
+      </div>
 
-        <h3>1) Allow this site in Jellyfin (CORS)</h3>
-        <ol>
-          <li>Open Jellyfin <b>Dashboard</b></li>
-          <li>Go to <b>Networking</b></li>
-          <li>Find <b>CORS / Allowed origins</b> (wording varies)</li>
-          <li>Add your site origin exactly (scheme + domain + port), e.g.:
-            <ul>
-              <li><code>https://yourname.github.io</code></li>
-              <li><code>https://yourdomain.com</code></li>
-              <li><code>http://localhost:8080</code></li>
-            </ul>
-          </li>
-        </ol>
+      <!-- ===== Cross-domain / CORS help ===== -->
+      <details class="helpBox" id="crossDomainHelp">
+        <summary>Running this page on a different domain/port than Jellyfin? (CORS + HTTPS help)</summary>
+        <div class="helpInner">
+          <p>
+            If this web app is opened from a different <b>origin</b> than your Jellyfin server
+            (different domain, subdomain, port, or http/https), the browser may block requests.
+          </p>
 
-        <p class="helpNote">
-          Origins must match exactly. <code>https://site.com</code> is not the same as
-          <code>http://site.com</code> or <code>https://site.com:8443</code>.
-        </p>
+          <h3>1) Allow this site in Jellyfin (CORS)</h3>
+          <ol>
+            <li>Open Jellyfin <b>Dashboard</b></li>
+            <li>Go to <b>Networking</b></li>
+            <li>Find <b>CORS / Allowed origins</b> (wording varies)</li>
+            <li>Add your site origin exactly (scheme + domain + port), e.g.:
+              <ul>
+                <li><code>https://yourname.github.io</code></li>
+                <li><code>https://yourdomain.com</code></li>
+                <li><code>http://localhost:8080</code></li>
+              </ul>
+            </li>
+          </ol>
 
-        <h3>2) Avoid “Mixed Content” (HTTPS vs HTTP)</h3>
-        <ul>
-          <li>If this page is loaded as <code>https://</code>, the browser may block calls to a Jellyfin server on <code>http://</code>.</li>
-          <li>Best results: use <code>https://</code> for both the page and Jellyfin.</li>
-          <li>WebSockets: <code>https://</code> pages require <code>wss://</code> (not <code>ws://</code>).</li>
-        </ul>
+          <p class="helpNote">
+            Origins must match exactly. <code>https://site.com</code> is not the same as
+            <code>http://site.com</code> or <code>https://site.com:8443</code>.
+          </p>
 
-        <h3>3) If you can’t enable CORS: use a reverse proxy (same-origin)</h3>
-        <p>
-          Browsers behave best when Jellyfin and this page share the same origin.
-          One approach is to proxy Jellyfin under your site path, for example:
-          <code>https://yourdomain.com/jellyfin/</code>
-        </p>
+          <h3>2) Avoid “Mixed Content” (HTTPS vs HTTP)</h3>
+          <ul>
+            <li>If this page is loaded as <code>https://</code>, the browser may block calls to a Jellyfin server on <code>http://</code>.</li>
+            <li>Best results: use <code>https://</code> for both the page and Jellyfin.</li>
+            <li>WebSockets: <code>https://</code> pages require <code>wss://</code> (not <code>ws://</code>).</li>
+          </ul>
 
-        <div class="codeBlock"><code># Nginx example (WebSocket support included)
+          <h3>3) If you can’t enable CORS: use a reverse proxy (same-origin)</h3>
+          <p>
+            Browsers behave best when Jellyfin and this page share the same origin.
+            One approach is to proxy Jellyfin under your site path, for example:
+            <code>https://yourdomain.com/jellyfin/</code>
+          </p>
+
+          <div class="codeBlock"><code># Nginx example (WebSocket support included)
 location /jellyfin/ {
   proxy_pass http://192.168.0.95:8096/;
   proxy_set_header Host $host;
@@ -155,90 +481,90 @@ location /jellyfin/ {
   proxy_set_header Connection "upgrade";
 }</code></div>
 
-        <h3>Troubleshooting</h3>
-        <ul>
-          <li>Open DevTools → <b>Console</b> and look for: <code>CORS policy</code>, <code>Mixed Content</code>, or WebSocket errors.</li>
-          <li>Make sure the Jellyfin URL you entered is reachable from your device (LAN vs public hostname).</li>
-          <li>Some browser extensions can block requests (adblock/privacy tools).</li>
-        </ul>
-      </div>
-    </details>
-    <!-- ===== /Cross-domain / CORS help ===== -->
-  </div>
+          <h3>Troubleshooting</h3>
+          <ul>
+            <li>Open DevTools → <b>Console</b> and look for: <code>CORS policy</code>, <code>Mixed Content</code>, or WebSocket errors.</li>
+            <li>Make sure the Jellyfin URL you entered is reachable from your device (LAN vs public hostname).</li>
+            <li>Some browser extensions can block requests (adblock/privacy tools).</li>
+          </ul>
+        </div>
+      </details>
+      <!-- ===== /Cross-domain / CORS help ===== -->
+    </div>
 
-  <div class="card">
+    <div class="card">
+      <div class="row">
+        <div>
+          <div class="small">Playback session to follow</div>
+          <div class="kv" style="margin-top:8px;">
+            <button id="btnRefreshSessions" class="secondary">Refresh sessions</button>
+            <select id="sessionSelect"></select>
+          </div>
+
+          <div class="kv" style="margin-top:10px;">
+            <label class="switch">
+              <input id="useClientSubtitleToggle" type="checkbox" checked>
+              <span class="small">Use client-selected subtitle track</span>
+            </label>
+            <select id="subtitleTrackSelect" disabled></select>
+            <button id="btnReloadSubs" class="secondary">Reload subtitles</button>
+          </div>
+
+          <div class="small muted" style="margin-top:8px;" id="clockInfo">
+            Clock: unknown
+          </div>
+        </div>
+
+        <div style="display:flex; gap:8px; align-items:end; justify-content:flex-end; flex-wrap:wrap;">
+          <div>
+            <div class="small">Poll (ms)</div>
+            <input id="pollMs" type="number" min="150" step="50" value="200">
+          </div>
+          <div>
+            <div class="small">Rate</div>
+            <input id="rate" type="number" min="0.75" max="2.0" step="0.05" value="1.25">
+          </div>
+          <div>
+            <div class="small">Voice</div>
+            <select id="voiceSelect"></select>
+          </div>
+          <button id="btnTest" class="secondary">Test voice</button>
+          <button id="btnStart">Start</button>
+          <button id="btnStop" class="secondary">Stop</button>
+        </div>
+      </div>
+
+      <div class="kv" style="margin-top:12px;">
+        <div>
+          <div class="small">Sync offset (<span id="offsetReadout">+0.00s</span>)</div>
+          <input id="offsetSlider" type="range" min="-5.0" max="5.0" step="0.05" value="0.0">
+        </div>
+        <label class="switch">
+          <input id="autoSyncToggle" type="checkbox" checked>
+          <span class="small">Auto sync</span>
+        </label>
+        <button id="btnResetOffset" class="secondary">Reset offset</button>
+      </div>
+
+      <div class="small" style="margin-top:10px" id="voiceInfo">Voices: loading…</div>
+    </div>
+
+    <div class="card">
+      <div class="small">Now speaking</div>
+      <div id="current">Waiting…</div>
+    </div>
+
     <div class="row">
-      <div>
-        <div class="small">Playback session to follow</div>
-        <div class="kv" style="margin-top:8px;">
-          <button id="btnRefreshSessions" class="secondary">Refresh sessions</button>
-          <select id="sessionSelect"></select>
-        </div>
-
-        <div class="kv" style="margin-top:10px;">
-          <label class="switch">
-            <input id="useClientSubtitleToggle" type="checkbox" checked>
-            <span class="small">Use client-selected subtitle track</span>
-          </label>
-          <select id="subtitleTrackSelect" disabled></select>
-          <button id="btnReloadSubs" class="secondary">Reload subtitles</button>
-        </div>
-
-        <div class="small muted" style="margin-top:8px;" id="clockInfo">
-          Clock: unknown
-        </div>
+      <div class="card">
+        <div class="small">Status</div>
+        <pre id="status"></pre>
       </div>
-
-      <div style="display:flex; gap:8px; align-items:end; justify-content:flex-end; flex-wrap:wrap;">
-        <div>
-          <div class="small">Poll (ms)</div>
-          <input id="pollMs" type="number" min="150" step="50" value="200">
-        </div>
-        <div>
-          <div class="small">Rate</div>
-          <input id="rate" type="number" min="0.75" max="2.0" step="0.05" value="1.25">
-        </div>
-        <div>
-          <div class="small">Voice</div>
-          <select id="voiceSelect"></select>
-        </div>
-        <button id="btnTest" class="secondary">Test voice</button>
-        <button id="btnStart">Start</button>
-        <button id="btnStop" class="secondary">Stop</button>
+      <div class="card">
+        <div class="small">Last fetched VTT preview</div>
+        <pre id="vttPreview"></pre>
       </div>
     </div>
-
-    <div class="kv" style="margin-top:12px;">
-      <div>
-        <div class="small">Sync offset (<span id="offsetReadout">+0.00s</span>)</div>
-        <input id="offsetSlider" type="range" min="-5.0" max="5.0" step="0.05" value="0.0">
-      </div>
-      <label class="switch">
-        <input id="autoSyncToggle" type="checkbox" checked>
-        <span class="small">Auto sync</span>
-      </label>
-      <button id="btnResetOffset" class="secondary">Reset offset</button>
-    </div>
-
-    <div class="small" style="margin-top:10px" id="voiceInfo">Voices: loading…</div>
-  </div>
-
-  <div class="card">
-    <div class="small">Now speaking</div>
-    <div id="current">Waiting…</div>
-  </div>
-
-  <div class="row">
-    <div class="card">
-      <div class="small">Status</div>
-      <pre id="status"></pre>
-    </div>
-    <div class="card">
-      <div class="small">Last fetched VTT preview</div>
-      <pre id="vttPreview"></pre>
-    </div>
-  </div>
-</main>
+  </main>
 
 <script>
 /* ========= STORAGE ========= */
@@ -324,14 +650,14 @@ function ensureDeviceId() {
 function setAuthPill(ok, text) {
   const p = el("authPill");
   p.textContent = text;
-  p.style.background = ok ? "#064e3b" : "#0b1222";
-  p.style.borderColor = ok ? "#065f46" : "#223";
+  p.style.background = ok ? "rgba(52,211,153,.16)" : "rgba(255,255,255,.06)";
+  p.style.borderColor = ok ? "rgba(52,211,153,.35)" : "rgba(255,255,255,.12)";
 }
 function setWSPill(ok, text) {
   const p = el("wsPill");
   p.textContent = text;
-  p.style.background = ok ? "#1d4ed8" : "#0b1222";
-  p.style.borderColor = ok ? "#1e40af" : "#223";
+  p.style.background = ok ? "rgba(34,211,238,.16)" : "rgba(255,255,255,.06)";
+  p.style.borderColor = ok ? "rgba(34,211,238,.35)" : "rgba(255,255,255,.12)";
 }
 
 /* ========= HTTP ========= */
@@ -425,8 +751,7 @@ function connectWS() {
     // PlaybackProgress is the money event
     if (msg.MessageType === "PlaybackProgress" || msg.MessageType === "PlaybackStart" || msg.MessageType === "PlaybackStop") {
       const d = msg.Data || {};
-      // We need to match the chosen session
-      // Common fields seen: SessionId, ItemId, PositionTicks
+      // Common fields: SessionId, ItemId, PositionTicks
       const sessId = d.SessionId || d.Session?.Id;
       const itemId = d.ItemId || d.NowPlayingItem?.Id;
 
@@ -709,10 +1034,8 @@ function parseVtt(vtt) {
     }
   }
 
-  // Ensure monotonic order even if file has oddities
   out.sort((a, b) => a.start - b.start);
 
-  // Optional: remove exact duplicates
   const dedup = [];
   for (const c of out) {
     const prev = dedup[dedup.length - 1];
@@ -726,23 +1049,17 @@ function isMostlyCoords(s) {
   const txt = (s || "").trim();
   if (!txt) return true;
 
-  // Common vector/path patterns: "m 1400 136 l 1741 135 ..."
-  // If it's a bunch of single-letter commands + numbers, skip it.
   const tokens = txt.split(/\s+/);
   if (tokens.length >= 10) {
     const cmdCount = tokens.filter(x => /^[mMlLbBcCsSqQtTaAhHvVzZ]$/.test(x)).length;
     const numCount = tokens.filter(x => /^-?\d+(\.\d+)?$/.test(x)).length;
-
-    // "m l l l ..." + many numbers is almost certainly drawing data
     if (cmdCount >= 2 && numCount >= 6 && (cmdCount + numCount) / tokens.length > 0.75) return true;
   }
 
-  // If it's overwhelmingly digits/symbols with very few letters, also skip
   const letters = (txt.match(/[A-Za-z]/g) || []).length;
   const digits  = (txt.match(/\d/g) || []).length;
   if (digits > 20 && letters < 8) return true;
 
-  // If it literally starts with a path-ish command then numbers
   if (/^\s*[mMlL]\s*-?\d/.test(txt) && digits > 10) return true;
 
   return false;
@@ -750,27 +1067,29 @@ function isMostlyCoords(s) {
 
 function cleanText(t) {
   let s = t || "";
-
-  // Remove ASS/SSA style tags like {\i1\b1} etc
   s = s.replace(/\{[^}]*\}/g, "");
-
-  // Remove backslashes that sometimes escape stuff
   s = s.replace(/\\/g, "");
-
-  // Strip HTML tags
   s = s.replace(/<[^>]+>/g, "");
-
-  // Optional: remove bracketed sound cues
   s = s.replace(/\[[^\]]+\]/g, "").replace(/\([^)]+\)/g, "");
-
+  s = normalizeInterjections(s);
+  s = s.replace(/-([?!])/g, "$1");
   s = s.replace(/\s+/g, " ").trim();
-
-  // NEW: skip vector/path garbage cues
   if (isMostlyCoords(s)) return "";
-
-  // Clamp length
   if (s.length > MAX_CHARS) s = s.slice(0, MAX_CHARS).trim() + "…";
   return s;
+}
+
+function normalizeInterjections(s) {
+  const rules = [
+    { re: /\b[hH]uh-?\s*\?/g, to: "huh?" },
+    { re: /\b[hH]uh-?\b/g, to: "huh…" },
+    { re: /\b[wW]h-?\s*\?/g, to: "wha?" },
+    { re: /\b[wW]h\?/g, to: "wha?" },
+    { re: /\b[tT]ch\b/g, to: "tchh" },
+  ];
+  let out = s;
+  for (const r of rules) out = out.replace(r.re, r.to);
+  return out;
 }
 
 async function loadCues(itemId, mediaSourceId, subtitleIndex) {
@@ -915,10 +1234,6 @@ el("btnTest").addEventListener("click", () => {
 
 /* ========= CLOCK SELECTION ========= */
 function getClockSecForSelectedSession(sessionSec, sessionId, itemId) {
-  // Prefer WS if:
-  // - we got a WS tick recently (<2s ago)
-  // - it matches the selected session (if provided)
-  // - if itemId is known, prefer matching item
   const nowPerf = performance.now();
   const wsFresh = lastWSSec != null && (nowPerf - lastWSAt) < 2000;
 
@@ -928,7 +1243,6 @@ function getClockSecForSelectedSession(sessionSec, sessionId, itemId) {
     else if (!sessionId) useWS = true;
 
     if (useWS && itemId && lastWSItemId && lastWSItemId !== itemId) {
-      // WS is for a different item; don't use it
       useWS = false;
     }
   }
@@ -967,7 +1281,6 @@ async function tick() {
       selectedSessionId = playable[0].Id;
       localStorage.setItem(STORE.chosenSessionId, selectedSessionId);
     }
-    // rebuild select UI occasionally
     const sel = el("sessionSelect");
     if (!sel.options.length) await refreshSessions();
   }
@@ -982,11 +1295,9 @@ async function tick() {
   const sessionSec = s.PlayState.PositionTicks / 10_000_000;
   lastSessionSec = sessionSec;
 
-  // Pick clock
   const sec = getClockSecForSelectedSession(sessionSec, s.Id, itemId);
   if (sec == null) return;
 
-  // Determine subtitle index to use
   let subtitleIndex = sessionSubtitleIndex;
   if (!useClientSubtitle()) {
     const override = getOverrideSubtitleIndex();
@@ -1018,7 +1329,6 @@ async function tick() {
   const tt = sec + offsetSec;
   const latestIdx = findLatestCueAtTime(tt);
 
-  // debug, but not spammy: only every ~1s
   const dbgKey = Math.floor(tt);
   if (!tick._lastDbg || tick._lastDbg !== dbgKey) {
     tick._lastDbg = dbgKey;
